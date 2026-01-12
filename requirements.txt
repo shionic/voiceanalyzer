@@ -1,0 +1,4 @@
+argparse
+numpy
+librosa
+soundfile
