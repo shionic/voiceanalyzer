@@ -2,3 +2,6 @@ argparse
 numpy
 librosa
 soundfile
+praat-parselmouth
+setuptools
+pyworld
