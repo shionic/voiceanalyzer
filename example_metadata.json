@@ -1,0 +1,25 @@
+[
+  {
+    "filepath": "audio/recording1.wav",
+    "author": "Speaker A",
+    "author_source": "interview_2024_01",
+    "tags": ["interview", "english", "male", "formal"],
+    "reliable_quality_rating": 0.92,
+    "unreliable_quality_rating": 0.78
+  },
+  {
+    "filepath": "audio/recording2.wav",
+    "author": "Speaker B",
+    "author_source": "interview_2024_01",
+    "tags": ["interview", "english", "female", "formal"],
+    "reliable_quality_rating": 0.88,
+    "unreliable_quality_rating": 0.75
+  },
+  {
+    "filepath": "audio/recording3.wav",
+    "author": "Speaker C",
+    "author_source": "podcast_episode_42",
+    "tags": ["podcast", "english", "casual"],
+    "reliable_quality_rating": 0.85
+  }
+]

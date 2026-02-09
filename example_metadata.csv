@@ -1,0 +1,5 @@
+filepath,author,author_source,tags,reliable_quality_rating,unreliable_quality_rating
+audio/recording1.wav,Speaker A,interview_2024_01,"interview, english, male, formal",0.92,0.78
+audio/recording2.wav,Speaker B,interview_2024_01,"interview, english, female, formal",0.88,0.75
+audio/recording3.wav,Speaker C,podcast_episode_42,"podcast, english, casual",0.85,
+audio/recording4.wav,Speaker D,meeting_2024_02,"meeting, english",0.80,0.65
