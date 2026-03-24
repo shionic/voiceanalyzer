@@ -102,8 +102,8 @@ class VoiceDatabase:
                     reliable_quality_rating FLOAT,
                     unreliable_quality_rating FLOAT,
                     
-                    -- Embedding vector (configurable dimension, typically 512 for x-vectors)
-                    x_vector vector(512),
+                    -- Embedding vector (configurable dimension, typically 192 for x-vectors)
+                    x_vector vector(192),
                     
                     -- Timestamps
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

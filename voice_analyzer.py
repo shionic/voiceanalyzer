@@ -130,35 +130,35 @@ class VoiceAnalyzer:
 
     def extract_pitch_pyin(self, audio: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Extract pitch using pYIN algorithm.
+        Extract pitch using the pYIN algorithm.
 
         Args:
-            audio: Audio signal
+            audio: Audio signal (mono)
 
         Returns:
-            Tuple of (pitches, confidence_measures)
+            Tuple of:
+                pitches: Fundamental frequency (Hz), 0 for unvoiced frames
+                confidence_measures: Voiced probability per frame
         """
-        pitches, magnitudes = librosa.piptrack(
-            y=audio,
+
+        f0, voiced_flag, voiced_prob = librosa.pyin(
+            audio,
+            fmin=self.min_f0,
+            fmax=self.max_f0,
             sr=self.sample_rate,
             hop_length=self.hop_length,
-            fmin=self.min_f0,
-            fmax=self.max_f0
+            frame_length=2048,          # Typical default; adjust if needed
+            win_length=2048
         )
 
-        # Extract predominant pitch per frame
-        pitch_vals = []
-        confidence_vals = []
+        # Replace NaNs (unvoiced) with 0 Hz
+        pitches = np.where(np.isnan(f0), 0.0, f0)
 
-        for i in range(pitches.shape[1]):
-            index = magnitudes[:, i].argmax()
-            pitch_val = pitches[index, i]
-            confidence = magnitudes[index, i]
+        # Confidence = probability of voicing
+        confidence = np.where(np.isnan(voiced_prob), 0.0, voiced_prob)
 
-            pitch_vals.append(pitch_val if pitch_val > 0 else 0)
-            confidence_vals.append(confidence)
+        return pitches.astype(np.float32), confidence.astype(np.float32)
 
-        return np.array(pitch_vals), np.array(confidence_vals)
 
     def extract_formants_lpc(self, audio: np.ndarray, pitch: np.ndarray,
                            order: int = 12) -> List[FormantData]:
@@ -324,6 +324,8 @@ class VoiceAnalyzer:
             'std': float(np.std(voiced_pitches)) if len(voiced_pitches) > 0 else 0.0,
             'min': float(np.min(voiced_pitches)) if len(voiced_pitches) > 0 else 0.0,
             'max': float(np.max(voiced_pitches)) if len(voiced_pitches) > 0 else 0.0,
+            'p5': float(np.percentile(voiced_pitches, 5)) if len(voiced_pitches) > 0 else 0.0,
+            'p95': float(np.percentile(voiced_pitches, 95)) if len(voiced_pitches) > 0 else 0.0,
             'median': float(np.median(voiced_pitches)) if len(voiced_pitches) > 0 else 0.0,
             'voicing_rate': len(voiced_pitches) / len(pitch) if len(pitch) > 0 else 0.0
         }
@@ -340,6 +342,8 @@ class VoiceAnalyzer:
                 'std': float(np.std(energy_values)) if len(energy_values) > 1 else 0.0,
                 'min': float(np.min(energy_values)),
                 'max': float(np.max(energy_values)),
+                'p5': float(np.percentile(energy_values, 5)),
+                'p95': float(np.percentile(energy_values, 95)),
                 'dynamic_range': float(np.max(energy_values) - np.min(energy_values))
             }
         else:
@@ -348,6 +352,8 @@ class VoiceAnalyzer:
                 'std': 0.0,
                 'min': 0.0,
                 'max': 0.0,
+                'p5': 0.0,
+                'p95': 0.0,
                 'dynamic_range': 0.0
             }
 
