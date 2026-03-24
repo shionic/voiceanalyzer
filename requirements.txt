@@ -8,3 +8,4 @@ pyworld
 psycopg2-binary>=2.9.0
 tqdm>=4.65.0
 git+https://github.com/speechbrain/speechbrain.git#egg=speechbrain
+python-telegram-bot>=20.0
