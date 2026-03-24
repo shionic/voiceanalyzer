@@ -223,10 +223,10 @@ async def _process_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE
         await tg_file.download_to_drive(custom_path=tmp_path)
         result = service.process_file(tmp_path)
         await msg.reply_text(format_output_html(result), parse_mode=ParseMode.HTML)
-        for chunk in format_output_full_text_html_chunks(result):
-            await msg.reply_text(chunk, parse_mode=ParseMode.HTML)
-        for chunk in format_output_full_json_html_chunks(result):
-            await msg.reply_text(chunk, parse_mode=ParseMode.HTML)
+        #for chunk in format_output_full_text_html_chunks(result):
+        #    await msg.reply_text(chunk, parse_mode=ParseMode.HTML)
+        #for chunk in format_output_full_json_html_chunks(result):
+        #    await msg.reply_text(chunk, parse_mode=ParseMode.HTML)
     except Exception as exc:
         await msg.reply_text(
             f"❌ <b>Error while processing audio:</b>\n<code>{escape(str(exc))}</code>",
