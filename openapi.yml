@@ -1,0 +1,363 @@
+openapi: 3.0.3
+info:
+  title: VoiceAnalyzer HTTP API
+  version: 1.0.0
+  description: |
+    FastAPI-based HTTP API for VoiceAnalyzer.
+
+    Public endpoints are available without auth.
+    Internal endpoints can be protected with `INTERNAL_API_TOKEN` and require `X-Internal-Token` header.
+
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local default server
+
+tags:
+  - name: public
+    description: Public endpoints
+  - name: internal
+    description: Internal endpoints
+
+paths:
+  /public/record/{record_id}:
+    get:
+      tags: [public]
+      summary: Get a voice record by ID
+      parameters:
+        - in: path
+          name: record_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Record found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  record:
+                    $ref: '#/components/schemas/VoiceRecord'
+                required: [record]
+        '404':
+          description: Record not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /public/compare:
+    post:
+      tags: [public]
+      summary: Compare two records by x-vector cosine similarity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompareRequest'
+      responses:
+        '200':
+          description: Comparison result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompareResponse'
+        '400':
+          description: Invalid input or one/both records do not have x_vector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: One or both records not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /internal/push-audio:
+    post:
+      tags: [internal]
+      summary: Process and push one audio file into DB
+      security:
+        - InternalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PushAudioRequest'
+      responses:
+        '200':
+          description: Inserted or skipped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushAudioResponse'
+        '400':
+          description: Invalid request (e.g., missing or invalid file_path)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized internal token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /internal/update-unreliable-quality:
+    post:
+      tags: [internal]
+      summary: Update unreliable quality rating for a record
+      security:
+        - InternalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUnreliableQualityRequest'
+      responses:
+        '200':
+          description: Updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  record:
+                    oneOf:
+                      - $ref: '#/components/schemas/VoiceRecord'
+                      - type: 'null'
+                required: [ok, record]
+        '401':
+          description: Unauthorized internal token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Record not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /internal/upload-audio:
+    post:
+      tags: [internal]
+      summary: Upload audio file directly (multipart/form-data) and ingest into DB
+      security:
+        - InternalToken: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UploadAudioForm'
+      responses:
+        '200':
+          description: Inserted or skipped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushAudioResponse'
+        '401':
+          description: Unauthorized internal token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    InternalToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+      required: [detail]
+
+    CompareRequest:
+      type: object
+      properties:
+        left_id:
+          type: integer
+        right_id:
+          type: integer
+      required: [left_id, right_id]
+
+    CompareResponse:
+      type: object
+      properties:
+        left_id:
+          type: integer
+        right_id:
+          type: integer
+        similarity:
+          type: number
+          format: float
+        cosine_distance:
+          type: number
+          format: float
+      required: [left_id, right_id, similarity, cosine_distance]
+
+    PushAudioRequest:
+      type: object
+      properties:
+        file_path:
+          type: string
+          description: Absolute path to audio file on server filesystem
+        skip_existing:
+          type: boolean
+          default: true
+        include_frames:
+          type: boolean
+          default: false
+        split_long_audio:
+          type: boolean
+          default: false
+        author:
+          type: string
+          nullable: true
+        author_source:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          nullable: true
+          items:
+            type: string
+        reliable_quality_rating:
+          type: number
+          format: float
+          nullable: true
+        unreliable_quality_rating:
+          type: number
+          format: float
+          nullable: true
+      required: [file_path]
+
+    PushAudioResponse:
+      type: object
+      properties:
+        record_id:
+          oneOf:
+            - type: integer
+            - type: 'null'
+        status:
+          type: string
+          description: Present when processing skipped or no insert happened
+        record:
+          oneOf:
+            - $ref: '#/components/schemas/VoiceRecord'
+            - type: 'null'
+      required: [record_id]
+
+    UpdateUnreliableQualityRequest:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Record ID
+        unreliable_quality_rating:
+          type: number
+          format: float
+      required: [id, unreliable_quality_rating]
+
+    UploadAudioForm:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+        skip_existing:
+          type: boolean
+          default: true
+        include_frames:
+          type: boolean
+          default: false
+        split_long_audio:
+          type: boolean
+          default: false
+        author:
+          type: string
+          nullable: true
+        author_source:
+          type: string
+          nullable: true
+        tags:
+          type: string
+          nullable: true
+          description: Comma-separated tags, e.g. "telegram,male"
+        reliable_quality_rating:
+          type: number
+          format: float
+          nullable: true
+        unreliable_quality_rating:
+          type: number
+          format: float
+          nullable: true
+      required: [file]
+
+    VoiceRecord:
+      type: object
+      properties:
+        id:
+          type: integer
+        analysis_data:
+          type: object
+          additionalProperties: true
+        author:
+          type: string
+          nullable: true
+        author_source:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          nullable: true
+          items:
+            type: string
+        file_hash:
+          type: string
+        duration:
+          type: number
+          format: float
+        reliable_quality_rating:
+          type: number
+          format: float
+          nullable: true
+        unreliable_quality_rating:
+          type: number
+          format: float
+          nullable: true
+        x_vector:
+          type: array
+          nullable: true
+          items:
+            type: number
+            format: float
+        created_at:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          nullable: true
+      required:
+        - id
+        - analysis_data
+        - file_hash
+        - duration

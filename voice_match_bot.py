@@ -19,6 +19,7 @@ from voiceanalyzer.matching import (
     VoiceMatchService,
     format_output_text,
 )
+from voiceanalyzer.api import VoiceHTTPAPIServer
 
 
 service = VoiceMatchService()
@@ -285,13 +286,23 @@ def main() -> None:
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
+    api_server = VoiceHTTPAPIServer(
+        host=os.getenv("INTERNAL_API_HOST", "127.0.0.1"),
+        port=int(os.getenv("INTERNAL_API_PORT", "8080")),
+        internal_api_token=os.getenv("INTERNAL_API_TOKEN", ""),
+    )
+    api_server.start()
+
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("analyze", analyze_reply))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.AUDIO, handle_audio))
 
-    app.run_polling()
+    try:
+        app.run_polling()
+    finally:
+        api_server.stop()
 
 
 if __name__ == "__main__":

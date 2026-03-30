@@ -22,6 +22,7 @@ It includes:
 - `voiceanalyzer/embeddings/ml_funcs.py` — embedding extraction + cosine similarity utilities
 - `voiceanalyzer/matching/speaker_pipeline.py` — shared pipeline used by CLI and Telegram bot
 - `voiceanalyzer/audio/io.py` — shared audio loading helpers
+- `voiceanalyzer/api/http_api.py` — FastAPI-based HTTP API (public + internal endpoints)
 - `voiceanalyzer/batch/batch_processor.py` — batch processor internals
 - `voice_match_cli.py` — local command-line matching utility
 - `voice_match_bot.py` — Telegram bot endpoint
@@ -173,6 +174,60 @@ python voice_match_bot.py
 ```
 
 Send a voice message or audio file to the bot and it returns analysis + male/female proximity matches.
+
+When bot starts, it also starts internal HTTP API server in the same process.
+
+---
+
+## HTTP API (started with bot)
+
+The API now runs on **FastAPI + Uvicorn** under the hood, which makes routes easier to extend and maintain (request validation, typed payloads, cleaner error responses).
+
+By default:
+- host: `127.0.0.1`
+- port: `8080`
+
+Config env vars:
+- `INTERNAL_API_HOST`
+- `INTERNAL_API_PORT`
+- `INTERNAL_API_TOKEN` (optional token via `X-Internal-Token` header for internal endpoints)
+
+### Public endpoints
+
+- `GET /public/record/{id}` — get DB record by id
+- `POST /public/compare` — compare two records by id
+
+Request body for compare:
+
+```json
+{ "left_id": 1, "right_id": 2 }
+```
+
+### Internal endpoints
+
+- `POST /internal/push-audio` — push new audio into DB using same ingestion flow as batch processor (`AudioFileProcessor.process_file`)
+- `POST /internal/upload-audio` — upload audio via `multipart/form-data` and ingest directly
+- `POST /internal/update-unreliable-quality` — update `unreliable_quality_rating` by id
+
+Request body examples:
+
+```json
+{ "file_path": "/abs/path/to/audio.wav", "author": "speaker", "tags": ["telegram"] }
+```
+
+```json
+{ "id": 123, "unreliable_quality_rating": 0.71 }
+```
+
+Upload example:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/internal/upload-audio" \
+  -H "X-Internal-Token: <token_if_configured>" \
+  -F "file=@/abs/path/to/audio.wav" \
+  -F "author=speaker" \
+  -F "tags=telegram,male"
+```
 
 ---
 
