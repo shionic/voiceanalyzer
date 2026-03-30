@@ -4,12 +4,11 @@ import soundfile as sf
 import pyworld as pw
 import os
 
+from voiceanalyzer.audio import load_audio_mono
+
 
 def load_wav(path):
-    x, fs = sf.read(path)
-    if x.ndim > 1:
-        x = x.mean(axis=1)
-    return x.astype(np.float64), fs
+    return load_audio_mono(path, target_sr=None, dtype=np.float64)
 
 
 def extract_world_features(x, fs, frame_period=5.0):

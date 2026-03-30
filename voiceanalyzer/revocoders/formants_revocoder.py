@@ -1,15 +1,16 @@
 import numpy as np
-import librosa
 import pyworld as pw
 import parselmouth
 import soundfile as sf
 from scipy.signal import lfilter
 
+from voiceanalyzer.audio import load_audio_mono
+
 # ------------------------------------------------------------
 # Utility: Load audio
 # ------------------------------------------------------------
 def load_audio(path, target_sr=16000):
-    y, sr = librosa.load(path, sr=target_sr, mono=True)
+    y, sr = load_audio_mono(path, target_sr=target_sr, dtype=np.float64)
     y = y.astype(np.float64)  # WORLD requires float64
     return y, sr
 

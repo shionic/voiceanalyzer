@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 import librosa
-from ml_funcs import wav_to_embedding, cosine_similarity, is_same_speaker
+from voiceanalyzer.embeddings import wav_to_embedding, cosine_similarity, is_same_speaker
 
 def load_audio(file_path):
     """

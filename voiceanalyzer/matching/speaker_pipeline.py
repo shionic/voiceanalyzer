@@ -16,9 +16,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from voice_analyzer import VoiceAnalyzer
-from ml_funcs import wav_to_embedding, cosine_similarity
-from db import VoiceDatabase
+from voiceanalyzer.analysis import VoiceAnalyzer
+from voiceanalyzer.embeddings import wav_to_embedding, cosine_similarity
+from voiceanalyzer.storage import VoiceDatabase
 
 
 @dataclass

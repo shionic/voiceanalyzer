@@ -13,7 +13,7 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-from speaker_pipeline import (
+from voiceanalyzer.matching import (
     SimilarityHit,
     VoiceMatchOutput,
     VoiceMatchService,

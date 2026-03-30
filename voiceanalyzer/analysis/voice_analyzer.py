@@ -17,6 +17,8 @@ from enum import Enum
 import warnings
 import traceback
 
+from voiceanalyzer.audio import load_audio_mono
+
 warnings.filterwarnings('ignore')
 
 class OutputFormat(Enum):
@@ -123,7 +125,7 @@ class VoiceAnalyzer:
             Tuple of (audio_data, sample_rate)
         """
         try:
-            audio, sr = librosa.load(filepath, sr=self.sample_rate, mono=True)
+            audio, sr = load_audio_mono(filepath, target_sr=self.sample_rate, dtype=np.float32)
             return audio, sr
         except Exception as e:
             raise IOError(f"Failed to load audio file {filepath}: {str(e)}")

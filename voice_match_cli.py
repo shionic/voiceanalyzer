@@ -7,7 +7,7 @@ import argparse
 import json
 import sys
 
-from speaker_pipeline import VoiceMatchService, format_output_text
+from voiceanalyzer.matching import VoiceMatchService, format_output_text
 
 
 def main() -> None:

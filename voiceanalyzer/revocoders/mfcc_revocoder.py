@@ -1,6 +1,8 @@
 import numpy as np
-import librosa
 import soundfile as sf
+import librosa
+
+from voiceanalyzer.audio import load_audio_mono
 
 
 def audio_to_mfcc(
@@ -13,7 +15,7 @@ def audio_to_mfcc(
     fmin=20,
     fmax=None
 ):
-    y, sr = librosa.load(audio_path, sr=sr, mono=True)
+    y, sr = load_audio_mono(audio_path, target_sr=sr, dtype=np.float32)
 
     mfcc = librosa.feature.mfcc(
         y=y,
