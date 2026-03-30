@@ -3,24 +3,26 @@
 VoiceAnalyzer is a Python project for **acoustic voice analysis**, **speaker embedding extraction**, and **database-backed voice matching**.
 
 It includes:
-- a low-level voice feature extractor (`voice_analyzer.py`)
-- batch ingestion into PostgreSQL + pgvector (`process_batch.py`, `db.py`)
-- speaker embedding utilities using SpeechBrain ECAPA (`ml_funcs.py`)
+- a low-level voice feature extractor (`voiceanalyzer/analysis/voice_analyzer.py`)
+- batch ingestion into PostgreSQL + pgvector (`process_batch.py`, `voiceanalyzer/storage/db.py`)
+- speaker embedding utilities using SpeechBrain ECAPA (`voiceanalyzer/embeddings/ml_funcs.py`)
 - a CLI matcher (`voice_match_cli.py`)
 - a Telegram bot matcher (`voice_match_bot.py`)
-- extra vocoder/re-synthesis experiments (`pyworld_revocoder.py`, `formants_revocoder.py`, `mfcc_revocoder.py`)
+- extra vocoder/re-synthesis experiments (`voiceanalyzer/revocoders/*.py`)
 
 ---
 
 ## Project Structure
 
-- `voice_analyzer.py` — core acoustic analysis (pitch, MFCC, formants, spectral, energy)
-- `db.py` — PostgreSQL access layer and schema initialization (with `pgvector`)
+- `voiceanalyzer/analysis/voice_analyzer.py` — core acoustic analysis (pitch, MFCC, formants, spectral, energy)
+- `voiceanalyzer/storage/db.py` — PostgreSQL access layer and schema initialization (with `pgvector`)
 - `process_batch.py` — recursive or metadata-driven ingestion pipeline into DB
-- `metadata_file.py` — metadata formats (`.json`, `.jsonl`, `.csv`) read/write/validation
+- `voiceanalyzer/metadata/metadata_file.py` — metadata formats (`.json`, `.jsonl`, `.csv`) read/write/validation
 - `process_metadata.py` — converts Mozilla Common Voice metadata to internal format
-- `ml_funcs.py` — embedding extraction + cosine similarity utilities
-- `speaker_pipeline.py` — shared pipeline used by CLI and Telegram bot
+- `voiceanalyzer/embeddings/ml_funcs.py` — embedding extraction + cosine similarity utilities
+- `voiceanalyzer/matching/speaker_pipeline.py` — shared pipeline used by CLI and Telegram bot
+- `voiceanalyzer/audio/io.py` — shared audio loading helpers
+- `voiceanalyzer/batch/batch_processor.py` — batch processor internals
 - `voice_match_cli.py` — local command-line matching utility
 - `voice_match_bot.py` — Telegram bot endpoint
 - `docker-compose.yml` / `Dockerfile` — containerized app + PostgreSQL (pgvector image)
@@ -115,7 +117,7 @@ python process_batch.py --init-db \
 ### A) Analyze a single file
 
 ```bash
-python voice_analyzer.py input.wav --format summary
+python voiceanalyzer/analysis/voice_analyzer.py input.wav --format summary
 ```
 
 Useful flags:
@@ -127,11 +129,14 @@ Useful flags:
 ```bash
 python process_batch.py \
   --input /path/to/audio \
+  --split-long-audio \
   --tags interview,english \
   --author "Speaker Name" \
   --db-host localhost --db-port 5432 \
   --db-name voiceanalyzer --db-user voiceanalyzer --db-password 1111
 ```
+
+> `--split-long-audio` is optional. By default, files are processed as single trimmed clips.
 
 ### C) Batch ingest from metadata file
 
@@ -192,16 +197,16 @@ Output entries include:
 
 These scripts are experimental and independent from the DB pipeline:
 
-- `pyworld_revocoder.py` — extract/save/load WORLD features and resynthesize
-- `formants_revocoder.py` — WORLD + Praat/Parselmouth formant emphasis
-- `mfcc_revocoder.py` — MFCC -> reconstructed waveform via Griffin-Lim
+- `voiceanalyzer/revocoders/pyworld_revocoder.py` — extract/save/load WORLD features and resynthesize
+- `voiceanalyzer/revocoders/formants_revocoder.py` — WORLD + Praat/Parselmouth formant emphasis
+- `voiceanalyzer/revocoders/mfcc_revocoder.py` — MFCC -> reconstructed waveform via Griffin-Lim
 
 Examples:
 
 ```bash
-python pyworld_revocoder.py --input_wav in.wav --feature_dir feats --output_wav out.wav --mode both
-python formants_revocoder.py in.wav out.wav
-python mfcc_revocoder.py in.wav out.wav
+python voiceanalyzer/revocoders/pyworld_revocoder.py --input_wav in.wav --feature_dir feats --output_wav out.wav --mode both
+python voiceanalyzer/revocoders/formants_revocoder.py in.wav out.wav
+python voiceanalyzer/revocoders/mfcc_revocoder.py in.wav out.wav
 ```
 
 ---
