@@ -207,7 +207,8 @@ Request body for compare:
 
 - `POST /internal/push-audio` — push new audio into DB using same ingestion flow as batch processor (`AudioFileProcessor.process_file`)
 - `POST /internal/upload-audio` — upload audio via `multipart/form-data` and ingest directly
-- `POST /internal/update-unreliable-quality` — update `unreliable_quality_rating` by id
+- `POST /internal/update-quality-ratings` — update one or both ratings (`reliable_quality_rating`, `unreliable_quality_rating`) by id
+- `POST /internal/update-unreliable-quality` — backward-compatible alias for `update-quality-ratings`
 
 Request body examples:
 
@@ -216,7 +217,7 @@ Request body examples:
 ```
 
 ```json
-{ "id": 123, "unreliable_quality_rating": 0.71 }
+{ "id": 123, "reliable_quality_rating": 0.92, "unreliable_quality_rating": 0.71 }
 ```
 
 Upload example:

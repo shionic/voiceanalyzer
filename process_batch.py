@@ -50,6 +50,12 @@ Examples:
         help="Split long files into fragments (disabled by default)",
     )
     parser.add_argument("--force-reprocess", action="store_true", help="Process files even if already in DB")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Number of worker threads for batch processing (default: 1)",
+    )
 
     parser.add_argument("--db-host", type=str, default="localhost")
     parser.add_argument("--db-port", type=int, default=5432)
@@ -98,6 +104,7 @@ Examples:
         skip_existing=not args.force_reprocess,
         include_frames=args.include_frames,
         split_long_audio=args.split_long_audio,
+        max_workers=args.workers,
     )
 
     start_time = datetime.now()

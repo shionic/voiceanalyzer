@@ -112,7 +112,7 @@ paths:
   /internal/update-unreliable-quality:
     post:
       tags: [internal]
-      summary: Update unreliable quality rating for a record
+      summary: Update one or both quality ratings for a record (backward-compatible path)
       security:
         - InternalToken: []
       requestBody:
@@ -120,7 +120,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateUnreliableQualityRequest'
+              $ref: '#/components/schemas/UpdateQualityRatingsRequest'
       responses:
         '200':
           description: Updated successfully
@@ -136,6 +136,58 @@ paths:
                       - $ref: '#/components/schemas/VoiceRecord'
                       - type: 'null'
                 required: [ok, record]
+        '400':
+          description: Invalid request (e.g., no ratings provided)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized internal token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Record not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /internal/update-quality-ratings:
+    post:
+      tags: [internal]
+      summary: Update one or both quality ratings for a record
+      security:
+        - InternalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateQualityRatingsRequest'
+      responses:
+        '200':
+          description: Updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  record:
+                    oneOf:
+                      - $ref: '#/components/schemas/VoiceRecord'
+                      - type: 'null'
+                required: [ok, record]
+        '400':
+          description: Invalid request (e.g., no ratings provided)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Unauthorized internal token
           content:
@@ -266,16 +318,22 @@ components:
             - type: 'null'
       required: [record_id]
 
-    UpdateUnreliableQualityRequest:
+    UpdateQualityRatingsRequest:
       type: object
       properties:
         id:
           type: integer
           description: Record ID
+        reliable_quality_rating:
+          type: number
+          format: float
+          nullable: true
         unreliable_quality_rating:
           type: number
           format: float
-      required: [id, unreliable_quality_rating]
+          nullable: true
+      required: [id]
+      description: At least one of reliable_quality_rating or unreliable_quality_rating should be provided.
 
     UploadAudioForm:
       type: object

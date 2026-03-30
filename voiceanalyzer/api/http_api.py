@@ -42,9 +42,10 @@ class PushAudioRequest(BaseModel):
     unreliable_quality_rating: Optional[float] = None
 
 
-class UpdateUnreliableQualityRequest(BaseModel):
+class UpdateQualityRatingsRequest(BaseModel):
     id: int = Field(..., description="Record ID")
-    unreliable_quality_rating: float
+    reliable_quality_rating: Optional[float] = None
+    unreliable_quality_rating: Optional[float] = None
 
 
 class VoiceHTTPAPIServer:
@@ -199,13 +200,18 @@ class VoiceHTTPAPIServer:
                     os.remove(temp_path)
 
         @app.post("/internal/update-unreliable-quality")
-        def update_unreliable_quality(
-            payload: UpdateUnreliableQualityRequest,
+        @app.post("/internal/update-quality-ratings")
+        def update_quality_ratings(
+            payload: UpdateQualityRatingsRequest,
             db: VoiceDatabase = Depends(get_db),
             _: None = Depends(verify_internal_token),
         ) -> Dict[str, Any]:
+            if payload.reliable_quality_rating is None and payload.unreliable_quality_rating is None:
+                raise HTTPException(status_code=400, detail="At least one rating must be provided")
+
             updated = db.update_quality_ratings(
                 record_id=payload.id,
+                reliable_quality_rating=payload.reliable_quality_rating,
                 unreliable_quality_rating=payload.unreliable_quality_rating,
             )
             if not updated:

@@ -6,7 +6,9 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -74,17 +76,21 @@ class AudioFileProcessor:
         skip_existing: bool = True,
         include_frames: bool = False,
         split_long_audio: bool = False,
+        max_workers: int = 1,
     ):
         self.db = VoiceDatabase(**db_config)
-        self.analyzer = VoiceAnalyzer()
         self.preprocessor = AudioPreprocessor(
             min_duration_sec=self.MIN_DURATION_SEC,
             max_duration_sec=self.MAX_DURATION_SEC,
         )
+        self._thread_local = threading.local()
+        self._sample_rate = VoiceAnalyzer().sample_rate
+        self.max_workers = max(1, max_workers)
         self.verbose = verbose
         self.skip_existing = skip_existing
         self.include_frames = include_frames
         self.split_long_audio = split_long_audio
+        self._stats_lock = threading.Lock()
 
         self.stats = {
             "total": 0,
@@ -93,6 +99,17 @@ class AudioFileProcessor:
             "errors": 0,
             "already_exists": 0,
         }
+
+    def _get_analyzer(self) -> VoiceAnalyzer:
+        analyzer = getattr(self._thread_local, "analyzer", None)
+        if analyzer is None:
+            analyzer = VoiceAnalyzer()
+            self._thread_local.analyzer = analyzer
+        return analyzer
+
+    def _inc_stat(self, key: str, value: int = 1) -> None:
+        with self._stats_lock:
+            self.stats[key] += value
 
     def find_audio_files(self, input_dir: Path) -> List[Path]:
         audio_files: List[Path] = []
@@ -112,9 +129,9 @@ class AudioFileProcessor:
         temp_files: List[str] = []
         try:
             if self.split_long_audio:
-                fragments, sr = self.preprocessor.prepare_fragments(filepath, self.analyzer.sample_rate)
+                fragments, sr = self.preprocessor.prepare_fragments(filepath, self._sample_rate)
             else:
-                audio, sr = librosa.load(str(filepath), sr=self.analyzer.sample_rate, mono=True)
+                audio, sr = librosa.load(str(filepath), sr=self._sample_rate, mono=True)
                 trimmed = self.preprocessor.trim_silence(audio)
                 duration = len(trimmed) / sr if sr > 0 else 0.0
                 if duration < self.MIN_DURATION_SEC:
@@ -125,7 +142,7 @@ class AudioFileProcessor:
             if not fragments:
                 if self.verbose:
                     print(f"  ⏭  Skipped: trimmed audio shorter than {self.MIN_DURATION_SEC:.1f}s")
-                self.stats["skipped"] += 1
+                self._inc_stat("skipped")
                 return None
 
             first_record_id: Optional[int] = None
@@ -142,7 +159,7 @@ class AudioFileProcessor:
                     if existing:
                         if self.verbose:
                             print(f"  ⏭  Fragment {idx}/{len(fragments)} already in database (ID: {existing['id']})")
-                        self.stats["already_exists"] += 1
+                        self._inc_stat("already_exists")
                         if first_record_id is None:
                             first_record_id = existing["id"]
                         continue
@@ -150,7 +167,8 @@ class AudioFileProcessor:
                 if self.verbose:
                     print(f"  🔍 Analyzing fragment {idx}/{len(fragments)}...")
 
-                result = self.analyzer.analyze(tmp_path, include_frames=self.include_frames)
+                analyzer = self._get_analyzer()
+                result = analyzer.analyze(tmp_path, include_frames=self.include_frames)
                 analysis_json = json.loads(json.dumps(result, cls=VoiceAnalysisEncoder))
                 analysis_json["filename"] = f"{filepath.name}#part{idx}"
                 analysis_json["source_file"] = str(filepath)
@@ -183,7 +201,7 @@ class AudioFileProcessor:
                     x_vector=x_vector,
                 )
 
-                self.stats["processed"] += 1
+                self._inc_stat("processed")
                 if first_record_id is None:
                     first_record_id = record_id
 
@@ -193,11 +211,11 @@ class AudioFileProcessor:
             if first_record_id is not None:
                 return first_record_id
 
-            self.stats["skipped"] += 1
+            self._inc_stat("skipped")
             return None
 
         except Exception as e:
-            self.stats["errors"] += 1
+            self._inc_stat("errors")
             print(f"  ❌ Error processing file: {e}")
             if self.verbose:
                 traceback.print_exc()
@@ -229,26 +247,57 @@ class AudioFileProcessor:
 
         print(f"Found {self.stats['total']} audio files")
 
-        with tqdm(total=self.stats["total"], desc="Processing files") as pbar:
-            for filepath in audio_files:
-                pbar.set_description(f"Processing {filepath.name}")
+        worker_count = min(self.max_workers, len(audio_files))
+        if worker_count <= 1:
+            with tqdm(total=self.stats["total"], desc="Processing files") as pbar:
+                for filepath in audio_files:
+                    pbar.set_description(f"Processing {filepath.name}")
 
-                if self.verbose:
-                    print(f"\n📁 {filepath}")
+                    if self.verbose:
+                        print(f"\n📁 {filepath}")
 
-                record_id = self.process_file(
-                    filepath=filepath,
-                    author=default_author,
-                    author_source=default_source,
-                    tags=default_tags,
-                    reliable_quality_rating=default_reliable_quality,
-                    unreliable_quality_rating=default_unreliable_quality,
-                )
+                    record_id = self.process_file(
+                        filepath=filepath,
+                        author=default_author,
+                        author_source=default_source,
+                        tags=default_tags,
+                        reliable_quality_rating=default_reliable_quality,
+                        unreliable_quality_rating=default_unreliable_quality,
+                    )
 
-                if move_processed_to and record_id is not None:
-                    self._move_file(filepath, input_dir, move_processed_to)
+                    if move_processed_to and record_id is not None:
+                        self._move_file(filepath, input_dir, move_processed_to)
 
-                pbar.update(1)
+                    pbar.update(1)
+        else:
+            with tqdm(total=self.stats["total"], desc=f"Processing files ({worker_count} threads)") as pbar:
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    future_to_path = {
+                        executor.submit(
+                            self.process_file,
+                            filepath,
+                            default_author,
+                            default_source,
+                            default_tags,
+                            default_reliable_quality,
+                            default_unreliable_quality,
+                        ): filepath
+                        for filepath in audio_files
+                    }
+
+                    for future in as_completed(future_to_path):
+                        filepath = future_to_path[future]
+                        try:
+                            record_id = future.result()
+                            if move_processed_to and record_id is not None:
+                                self._move_file(filepath, input_dir, move_processed_to)
+                        except Exception as e:
+                            self._inc_stat("errors")
+                            print(f"  ❌ Error processing file {filepath}: {e}")
+                            if self.verbose:
+                                traceback.print_exc()
+                        finally:
+                            pbar.update(1)
 
         return self.stats
 
@@ -289,36 +338,72 @@ class AudioFileProcessor:
         self.stats["total"] = len(merged_entries)
         print(f"Processing {self.stats['total']} files from metadata")
 
+        tasks: List[tuple[Path, Any]] = []
         with tqdm(total=self.stats["total"], desc="Processing files") as pbar:
             for entry in merged_entries:
                 filepath = Path(entry.filepath)
                 if not filepath.is_absolute():
                     filepath = metadata_base_dir / filepath
 
-                pbar.set_description(f"Processing {filepath.name}")
-
-                if self.verbose:
-                    print(f"\n📁 {filepath}")
-
                 if not filepath.exists():
                     print(f"  ⚠️  File not found: {filepath}")
-                    self.stats["skipped"] += 1
+                    self._inc_stat("skipped")
                     pbar.update(1)
                     continue
 
-                record_id = self.process_file(
-                    filepath=filepath,
-                    author=entry.author,
-                    author_source=entry.author_source,
-                    tags=entry.tags,
-                    reliable_quality_rating=entry.reliable_quality_rating,
-                    unreliable_quality_rating=entry.unreliable_quality_rating,
-                )
+                tasks.append((filepath, entry))
 
-                if move_processed_to and record_id is not None:
-                    self._move_file(filepath, metadata_base_dir, move_processed_to)
+            worker_count = min(self.max_workers, len(tasks)) if tasks else 1
 
-                pbar.update(1)
+            if worker_count <= 1:
+                for filepath, entry in tasks:
+                    pbar.set_description(f"Processing {filepath.name}")
+
+                    if self.verbose:
+                        print(f"\n📁 {filepath}")
+
+                    record_id = self.process_file(
+                        filepath=filepath,
+                        author=entry.author,
+                        author_source=entry.author_source,
+                        tags=entry.tags,
+                        reliable_quality_rating=entry.reliable_quality_rating,
+                        unreliable_quality_rating=entry.unreliable_quality_rating,
+                    )
+
+                    if move_processed_to and record_id is not None:
+                        self._move_file(filepath, metadata_base_dir, move_processed_to)
+
+                    pbar.update(1)
+            else:
+                pbar.set_description(f"Processing files ({worker_count} threads)")
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    future_to_file = {
+                        executor.submit(
+                            self.process_file,
+                            filepath,
+                            entry.author,
+                            entry.author_source,
+                            entry.tags,
+                            entry.reliable_quality_rating,
+                            entry.unreliable_quality_rating,
+                        ): filepath
+                        for filepath, entry in tasks
+                    }
+
+                    for future in as_completed(future_to_file):
+                        filepath = future_to_file[future]
+                        try:
+                            record_id = future.result()
+                            if move_processed_to and record_id is not None:
+                                self._move_file(filepath, metadata_base_dir, move_processed_to)
+                        except Exception as e:
+                            self._inc_stat("errors")
+                            print(f"  ❌ Error processing file {filepath}: {e}")
+                            if self.verbose:
+                                traceback.print_exc()
+                        finally:
+                            pbar.update(1)
 
         return self.stats
 
