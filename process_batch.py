@@ -7,9 +7,11 @@ Recursively processes audio files, analyzes them, and stores results in database
 import argparse
 import sys
 import json
+import os
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import shutil
+import tempfile
 from datetime import datetime
 import traceback
 
@@ -29,6 +31,7 @@ except ImportError as e:
 
 import numpy as np
 import librosa
+import soundfile as sf
 
 
 class AudioFileProcessor:
@@ -36,6 +39,8 @@ class AudioFileProcessor:
     
     # Supported audio formats
     SUPPORTED_FORMATS = {'.wav', '.mp3', '.flac', '.ogg', '.m4a', '.aac', '.opus'}
+    MIN_DURATION_SEC = 4.0
+    MAX_DURATION_SEC = 10.0
     
     def __init__(self,
                  db_config: Dict[str, Any],
@@ -65,6 +70,60 @@ class AudioFileProcessor:
             'errors': 0,
             'already_exists': 0
         }
+
+    def _suppress_noise_basic(self, audio: np.ndarray, sr: int) -> np.ndarray:
+        """Apply basic spectral subtraction noise suppression."""
+        if audio.size == 0:
+            return audio
+
+        n_fft = 1024
+        hop_length = 256
+        stft = librosa.stft(audio, n_fft=n_fft, hop_length=hop_length)
+        magnitude, phase = np.abs(stft), np.angle(stft)
+
+        # Estimate stationary noise floor from low-energy percentile per frequency bin
+        noise_profile = np.percentile(magnitude, 10, axis=1, keepdims=True)
+        suppression_factor = 1.5
+        denoised_mag = np.maximum(magnitude - suppression_factor * noise_profile, 0.0)
+
+        denoised_stft = denoised_mag * np.exp(1j * phase)
+        denoised = librosa.istft(denoised_stft, hop_length=hop_length, length=len(audio))
+        return denoised.astype(np.float32)
+
+    def _trim_silence(self, audio: np.ndarray) -> np.ndarray:
+        """Trim leading and trailing silence."""
+        if audio.size == 0:
+            return audio
+        trimmed, _ = librosa.effects.trim(audio, top_db=30)
+        return trimmed.astype(np.float32)
+
+    def _split_fragments(self, audio: np.ndarray, sr: int) -> List[np.ndarray]:
+        """Split long audio into fragments in [MIN_DURATION_SEC, MAX_DURATION_SEC]."""
+        duration = len(audio) / sr if sr > 0 else 0.0
+        if duration < self.MIN_DURATION_SEC:
+            return []
+        if duration <= self.MAX_DURATION_SEC:
+            return [audio.astype(np.float32)]
+
+        n_parts = int(np.ceil(duration / self.MAX_DURATION_SEC))
+        boundaries = np.linspace(0, len(audio), n_parts + 1, dtype=int)
+
+        fragments: List[np.ndarray] = []
+        for i in range(n_parts):
+            frag = audio[boundaries[i]:boundaries[i + 1]]
+            frag_duration = len(frag) / sr if sr > 0 else 0.0
+            if frag_duration >= self.MIN_DURATION_SEC:
+                fragments.append(frag.astype(np.float32))
+
+        return fragments
+
+    def _prepare_fragments(self, filepath: Path) -> tuple[List[np.ndarray], int]:
+        """Load file, suppress noise, trim silence, and split if needed."""
+        audio, sr = librosa.load(str(filepath), sr=self.analyzer.sample_rate, mono=True)
+        denoised = self._suppress_noise_basic(audio, sr)
+        trimmed = self._trim_silence(denoised)
+        fragments = self._split_fragments(trimmed, sr)
+        return fragments, sr
     
     def find_audio_files(self, input_dir: Path) -> List[Path]:
         """
@@ -101,73 +160,97 @@ class AudioFileProcessor:
             unreliable_quality_rating: Unreliable quality rating
             
         Returns:
-            Database record ID if successful, None otherwise
+            First database record ID if at least one fragment is successful, None otherwise
         """
+        temp_files: List[str] = []
         try:
-            # Calculate file hash
-            file_hash = self.db.calculate_file_hash(str(filepath))
-            
-            # Check if already exists
-            if self.skip_existing:
-                existing = self.db.get_recording_by_hash(file_hash)
-                if existing:
-                    if self.verbose:
-                        print(f"  ⏭  Already in database (ID: {existing['id']})")
-                    self.stats['already_exists'] += 1
-                    return existing['id']
-            
-            # Perform voice analysis
-            if self.verbose:
-                print(f"  🔍 Analyzing with VoiceAnalyzer...")
-            
-            result = self.analyzer.analyze(
-                str(filepath),
-                include_frames=self.include_frames
-            )
-            
-            # Convert to JSON-serializable dict
-            analysis_json = json.loads(
-                json.dumps(result, cls=VoiceAnalysisEncoder)
-            )
-            
-            # Extract x-vector using ml_funcs
-            if self.verbose:
-                print(f"  🧠 Extracting x-vector embedding...")
-            
-            try:
-                # Load audio for x-vector extraction
-                wav, sr = librosa.load(str(filepath), sr=16000, mono=True)
-                x_vector = wav_to_embedding(wav, sr)
-            except Exception as e:
+            fragments, sr = self._prepare_fragments(filepath)
+
+            if not fragments:
                 if self.verbose:
-                    print(f"  ⚠️  Warning: Could not extract x-vector: {e}")
-                x_vector = None
-            
-            # Insert into database
-            if self.verbose:
-                print(f"  💾 Storing in database...")
-            
-            record_id = self.db.insert_voice_recording(
-                analysis_data=analysis_json,
-                file_hash=file_hash,
-                duration=result.duration,
-                author=author,
-                author_source=author_source,
-                tags=tags or [],
-                reliable_quality_rating=reliable_quality_rating,
-                unreliable_quality_rating=unreliable_quality_rating,
-                x_vector=x_vector
-            )
-            
-            self.stats['processed'] += 1
-            
-            if self.verbose:
-                print(f"  ✅ Successfully stored (ID: {record_id})")
-                print(f"     Duration: {result.duration:.2f}s")
-                if result.pitch_statistics:
-                    print(f"     Mean pitch: {result.pitch_statistics.get('mean', 0):.1f} Hz")
-            
-            return record_id
+                    print(f"  ⏭  Skipped: trimmed audio shorter than {self.MIN_DURATION_SEC:.1f}s")
+                self.stats['skipped'] += 1
+                return None
+
+            first_record_id: Optional[int] = None
+            for idx, fragment in enumerate(fragments, start=1):
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                    tmp_path = tmp.name
+                temp_files.append(tmp_path)
+                sf.write(tmp_path, fragment, sr)
+
+                # Calculate file hash for this fragment
+                file_hash = self.db.calculate_file_hash(tmp_path)
+
+                # Check if already exists
+                if self.skip_existing:
+                    existing = self.db.get_recording_by_hash(file_hash)
+                    if existing:
+                        if self.verbose:
+                            print(f"  ⏭  Fragment {idx}/{len(fragments)} already in database (ID: {existing['id']})")
+                        self.stats['already_exists'] += 1
+                        if first_record_id is None:
+                            first_record_id = existing['id']
+                        continue
+
+                # Perform voice analysis on fragment
+                if self.verbose:
+                    print(f"  🔍 Analyzing fragment {idx}/{len(fragments)}...")
+
+                result = self.analyzer.analyze(
+                    tmp_path,
+                    include_frames=self.include_frames
+                )
+
+                # Convert to JSON-serializable dict
+                analysis_json = json.loads(
+                    json.dumps(result, cls=VoiceAnalysisEncoder)
+                )
+                analysis_json['filename'] = f"{filepath.name}#part{idx}"
+                analysis_json['source_file'] = str(filepath)
+                analysis_json['fragment_index'] = idx
+                analysis_json['fragment_count'] = len(fragments)
+
+                # Extract x-vector using ml_funcs
+                if self.verbose:
+                    print(f"  🧠 Extracting x-vector embedding for fragment {idx}/{len(fragments)}...")
+
+                try:
+                    wav_16k = librosa.resample(fragment, orig_sr=sr, target_sr=16000)
+                    x_vector = wav_to_embedding(wav_16k, 16000)
+                except Exception as e:
+                    if self.verbose:
+                        print(f"  ⚠️  Warning: Could not extract x-vector: {e}")
+                    x_vector = None
+
+                # Insert into database
+                if self.verbose:
+                    print(f"  💾 Storing fragment {idx}/{len(fragments)} in database...")
+
+                record_id = self.db.insert_voice_recording(
+                    analysis_data=analysis_json,
+                    file_hash=file_hash,
+                    duration=result.duration,
+                    author=author,
+                    author_source=author_source,
+                    tags=tags or [],
+                    reliable_quality_rating=reliable_quality_rating,
+                    unreliable_quality_rating=unreliable_quality_rating,
+                    x_vector=x_vector
+                )
+
+                self.stats['processed'] += 1
+                if first_record_id is None:
+                    first_record_id = record_id
+
+                if self.verbose:
+                    print(f"  ✅ Fragment stored (ID: {record_id}, duration: {result.duration:.2f}s)")
+
+            if first_record_id is not None:
+                return first_record_id
+
+            self.stats['skipped'] += 1
+            return None
             
         except Exception as e:
             self.stats['errors'] += 1
@@ -175,6 +258,13 @@ class AudioFileProcessor:
             if self.verbose:
                 traceback.print_exc()
             return None
+        finally:
+            for tmp_path in temp_files:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
     
     def process_directory(self,
                          input_dir: Path,
