@@ -101,7 +101,19 @@ def process_voxceleb2(input_dir: Path) -> List[MetadataEntry]:
         reader = csv.DictReader(f)
         for row in reader:
             normalized = {k.strip().lower(): (v.strip() if isinstance(v, str) else v) for k, v in row.items() if k}
-            vox_id = normalized.get("voxceleb2 id")
+            vox_id = (
+                normalized.get("voxceleb2 id")
+                or normalized.get("id")
+                or normalized.get("speaker_id")
+                or next(
+                    (
+                        v.strip()
+                        for v in normalized.values()
+                        if isinstance(v, str) and re.fullmatch(r"id\d+", v.strip())
+                    ),
+                    None,
+                )
+            )
             if not vox_id:
                 continue
             speaker_meta[vox_id] = {
@@ -110,33 +122,50 @@ def process_voxceleb2(input_dir: Path) -> List[MetadataEntry]:
                 "set": normalized.get("set"),
             }
 
+    # Some VoxCeleb2 CSV variants may contain only speaker IDs without metadata columns.
+    # In that case DictReader can produce no rows, so we fallback to plain CSV parsing.
+    if not speaker_meta:
+        with open(meta_path, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                for value in row:
+                    if not isinstance(value, str):
+                        continue
+                    candidate = value.strip()
+                    if re.fullmatch(r"id\d+", candidate):
+                        speaker_meta[candidate] = {
+                            "vggface2_id": None,
+                            "gender": None,
+                            "set": None,
+                        }
+
     entries: List[MetadataEntry] = []
-    for file_path in input_dir.rglob("*"):
-        if not file_path.is_file() or file_path.suffix.lower() not in SUPPORTED_AUDIO_FORMATS:
+    for speaker_id, meta in speaker_meta.items():
+        speaker_dir = input_dir / "aac" / speaker_id
+        if not speaker_dir.exists():
             continue
 
-        rel_path = file_path.relative_to(input_dir)
-        speaker_id = _extract_voxceleb2_speaker_id(rel_path)
-        if not speaker_id:
-            continue
+        for file_path in speaker_dir.rglob("*.aac"):
+            if not file_path.is_file() or file_path.suffix.lower() not in SUPPORTED_AUDIO_FORMATS:
+                continue
 
-        meta = speaker_meta.get(speaker_id, {})
-        dataset_set = meta.get("set")
-        tags = [*normalize_gender_tag(meta.get("gender"))]
-        if dataset_set:
-            tags.append(dataset_set.lower())
+            rel_path = file_path.relative_to(input_dir)
+            dataset_set = meta.get("set")
+            tags = [*normalize_gender_tag(meta.get("gender"))]
+            if dataset_set:
+                tags.append(dataset_set.lower())
 
-        entries.append(
-            MetadataEntry(
-                filepath=str(rel_path),
-                author=speaker_id,
-                author_source=AUTHOR_SOURCE_VOXCELEB2,
-                tags=tags,
-                reliable_quality_rating=None,
-                unreliable_quality_rating=None,
-                vggface2_id=meta.get("vggface2_id"),
-                voxceleb2_set=dataset_set.lower() if dataset_set else None,
+            entries.append(
+                MetadataEntry(
+                    filepath=str(rel_path),
+                    author=speaker_id,
+                    author_source=AUTHOR_SOURCE_VOXCELEB2,
+                    tags=tags,
+                    reliable_quality_rating=None,
+                    unreliable_quality_rating=None,
+                    vggface2_id=meta.get("vggface2_id"),
+                    voxceleb2_set=dataset_set.lower() if dataset_set else None,
+                )
             )
-        )
 
     return entries
