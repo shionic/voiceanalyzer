@@ -11,12 +11,15 @@ Pipeline steps:
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import soundfile as sf
 
 from voiceanalyzer.analysis import VoiceAnalyzer
+from voiceanalyzer.audio import preprocess_audio_basic
 from voiceanalyzer.embeddings import wav_to_embedding, cosine_similarity
 from voiceanalyzer.storage import VoiceDatabase
 
@@ -99,8 +102,18 @@ class VoiceMatchService:
 
     def process_file(self, audio_path: str) -> VoiceMatchOutput:
         wav, sr = self.analyzer.load_audio(audio_path)
-        analysis = self.analyzer.analyze(audio_path, include_frames=False)
-        query_vec = wav_to_embedding(wav, sr)
+        preprocessed_wav = preprocess_audio_basic(wav)
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            sf.write(tmp_path, preprocessed_wav, sr)
+            analysis = self.analyzer.analyze(tmp_path, include_frames=False)
+            query_vec = wav_to_embedding(preprocessed_wav, sr)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
         query_pitch_mean = float(analysis.pitch_statistics.get("mean", 0.0))
         query_voicing_rate = float(analysis.pitch_statistics.get("voicing_rate", 0.0))
@@ -156,7 +169,7 @@ class VoiceMatchService:
             male_female_gap = abs(male_best.similarity - female_best.similarity)
 
         return VoiceMatchOutput(
-            filename=analysis.filename,
+            filename=os.path.basename(audio_path),
             duration=analysis.duration,
             male_best=male_best,
             female_best=female_best,

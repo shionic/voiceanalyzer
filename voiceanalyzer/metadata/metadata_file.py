@@ -300,12 +300,13 @@ class MetadataFile:
         print(f"Template metadata file created: {filepath}")
 
 
-def validate_metadata_entries(entries: List[MetadataEntry]) -> List[str]:
+def validate_metadata_entries(entries: List[MetadataEntry], base_dir: Optional[Path] = None) -> List[str]:
     """
     Validate metadata entries and return list of errors.
     
     Args:
         entries: List of MetadataEntry objects
+        base_dir: Optional base directory used to resolve relative filepaths
         
     Returns:
         List of error messages (empty if all valid)
@@ -319,6 +320,8 @@ def validate_metadata_entries(entries: List[MetadataEntry]) -> List[str]:
             continue
         
         filepath = Path(entry.filepath)
+        if not filepath.is_absolute() and base_dir is not None:
+            filepath = base_dir / filepath
         if not filepath.exists():
             errors.append(f"Entry {i}: File not found: {entry.filepath}")
         

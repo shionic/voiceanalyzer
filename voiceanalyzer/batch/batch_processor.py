@@ -15,6 +15,7 @@ import numpy as np
 import soundfile as sf
 from tqdm import tqdm
 
+from voiceanalyzer.audio import preprocess_audio_basic, trim_silence
 from voiceanalyzer.constants import SUPPORTED_AUDIO_FORMATS
 from voiceanalyzer.storage import VoiceDatabase
 from voiceanalyzer.metadata import MetadataFile, validate_metadata_entries
@@ -30,27 +31,10 @@ class AudioPreprocessor:
         self.max_duration_sec = max_duration_sec
 
     def suppress_noise_basic(self, audio: np.ndarray) -> np.ndarray:
-        if audio.size == 0:
-            return audio
-
-        n_fft = 1024
-        hop_length = 256
-        stft = librosa.stft(audio, n_fft=n_fft, hop_length=hop_length)
-        magnitude, phase = np.abs(stft), np.angle(stft)
-
-        noise_profile = np.percentile(magnitude, 10, axis=1, keepdims=True)
-        suppression_factor = 1.5
-        denoised_mag = np.maximum(magnitude - suppression_factor * noise_profile, 0.0)
-
-        denoised_stft = denoised_mag * np.exp(1j * phase)
-        denoised = librosa.istft(denoised_stft, hop_length=hop_length, length=len(audio))
-        return denoised.astype(np.float32)
+        return preprocess_audio_basic(audio, silence_top_db=120)
 
     def trim_silence(self, audio: np.ndarray) -> np.ndarray:
-        if audio.size == 0:
-            return audio
-        trimmed, _ = librosa.effects.trim(audio, top_db=30)
-        return trimmed.astype(np.float32)
+        return trim_silence(audio, top_db=30)
 
     def split_fragments(self, audio: np.ndarray, sr: int) -> List[np.ndarray]:
         duration = len(audio) / sr if sr > 0 else 0.0
@@ -72,8 +56,7 @@ class AudioPreprocessor:
 
     def prepare_fragments(self, filepath: Path, target_sr: int) -> tuple[List[np.ndarray], int]:
         audio, sr = librosa.load(str(filepath), sr=target_sr, mono=True)
-        denoised = self.suppress_noise_basic(audio)
-        trimmed = self.trim_silence(denoised)
+        trimmed = preprocess_audio_basic(audio, silence_top_db=30)
         fragments = self.split_fragments(trimmed, sr)
         return fragments, sr
 
@@ -282,8 +265,9 @@ class AudioFileProcessor:
         print(f"Reading metadata file: {metadata_file}")
         mf = MetadataFile(str(metadata_file))
         entries = mf.read()
+        metadata_base_dir = metadata_file.parent
 
-        errors = validate_metadata_entries(entries)
+        errors = validate_metadata_entries(entries, base_dir=metadata_base_dir)
         if errors:
             print("\n⚠️  Validation errors found:")
             for error in errors:
@@ -304,7 +288,6 @@ class AudioFileProcessor:
 
         self.stats["total"] = len(merged_entries)
         print(f"Processing {self.stats['total']} files from metadata")
-        metadata_base_dir = metadata_file.parent
 
         with tqdm(total=self.stats["total"], desc="Processing files") as pbar:
             for entry in merged_entries:
