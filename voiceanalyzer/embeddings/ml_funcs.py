@@ -4,11 +4,30 @@ import torchaudio
 from speechbrain.pretrained import EncoderClassifier
 from scipy.spatial.distance import cosine
 
+_THREADS_CONFIGURED = False
+
 # Load once at module import (fast at runtime after first load)
 _classifier = EncoderClassifier.from_hparams(
     source="speechbrain/spkrec-ecapa-voxceleb",
     run_opts={"device": "cpu"}  # change to "cuda" if GPU is available
 )
+
+
+def configure_torch_threads(intra_op_threads: int | None = None, inter_op_threads: int | None = None) -> None:
+    """Configure torch CPU thread pools once per process.
+
+    Useful to avoid oversubscription when many worker threads are used.
+    """
+    global _THREADS_CONFIGURED
+    if _THREADS_CONFIGURED:
+        return
+
+    if intra_op_threads is not None and intra_op_threads > 0:
+        torch.set_num_threads(intra_op_threads)
+    if inter_op_threads is not None and inter_op_threads > 0:
+        torch.set_num_interop_threads(inter_op_threads)
+
+    _THREADS_CONFIGURED = True
 
 
 # ------------------------------------------------------------

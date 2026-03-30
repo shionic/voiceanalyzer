@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
+import hashlib
 import shutil
-import tempfile
 import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,14 +13,13 @@ from typing import Any, Dict, List, Optional
 
 import librosa
 import numpy as np
-import soundfile as sf
 from tqdm import tqdm
 
 from voiceanalyzer.audio import preprocess_audio_basic, trim_silence
 from voiceanalyzer.constants import SUPPORTED_AUDIO_FORMATS
 from voiceanalyzer.storage import VoiceDatabase
 from voiceanalyzer.metadata import MetadataFile, validate_metadata_entries
-from voiceanalyzer.embeddings import wav_to_embedding
+from voiceanalyzer.embeddings import configure_torch_threads, wav_to_embedding
 from voiceanalyzer.analysis import VoiceAnalysisEncoder, VoiceAnalyzer
 
 
@@ -77,7 +75,13 @@ class AudioFileProcessor:
         include_frames: bool = False,
         split_long_audio: bool = False,
         max_workers: int = 1,
+        torch_intra_threads: Optional[int] = None,
+        torch_inter_threads: Optional[int] = None,
     ):
+        configure_torch_threads(
+            intra_op_threads=torch_intra_threads,
+            inter_op_threads=torch_inter_threads,
+        )
         self.db = VoiceDatabase(**db_config)
         self.preprocessor = AudioPreprocessor(
             min_duration_sec=self.MIN_DURATION_SEC,
@@ -126,7 +130,6 @@ class AudioFileProcessor:
         reliable_quality_rating: Optional[float] = None,
         unreliable_quality_rating: Optional[float] = None,
     ) -> Optional[int]:
-        temp_files: List[str] = []
         try:
             if self.split_long_audio:
                 fragments, sr = self.preprocessor.prepare_fragments(filepath, self._sample_rate)
@@ -147,12 +150,7 @@ class AudioFileProcessor:
 
             first_record_id: Optional[int] = None
             for idx, fragment in enumerate(fragments, start=1):
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                    tmp_path = tmp.name
-                temp_files.append(tmp_path)
-                sf.write(tmp_path, fragment, sr)
-
-                file_hash = self.db.calculate_file_hash(tmp_path)
+                file_hash = self._calculate_fragment_hash(fragment, sr)
 
                 if self.skip_existing:
                     existing = self.db.get_recording_by_hash(file_hash)
@@ -168,7 +166,12 @@ class AudioFileProcessor:
                     print(f"  🔍 Analyzing fragment {idx}/{len(fragments)}...")
 
                 analyzer = self._get_analyzer()
-                result = analyzer.analyze(tmp_path, include_frames=self.include_frames)
+                result = analyzer.analyze_audio(
+                    audio=fragment,
+                    filepath=str(filepath),
+                    include_frames=self.include_frames,
+                    verbose=False,
+                )
                 analysis_json = json.loads(json.dumps(result, cls=VoiceAnalysisEncoder))
                 analysis_json["filename"] = f"{filepath.name}#part{idx}"
                 analysis_json["source_file"] = str(filepath)
@@ -179,8 +182,7 @@ class AudioFileProcessor:
                     print(f"  🧠 Extracting x-vector embedding for fragment {idx}/{len(fragments)}...")
 
                 try:
-                    wav_16k = librosa.resample(fragment, orig_sr=sr, target_sr=16000)
-                    x_vector = wav_to_embedding(wav_16k, 16000)
+                    x_vector = wav_to_embedding(fragment, sr)
                 except Exception as e:
                     if self.verbose:
                         print(f"  ⚠️  Warning: Could not extract x-vector: {e}")
@@ -220,13 +222,16 @@ class AudioFileProcessor:
             if self.verbose:
                 traceback.print_exc()
             return None
-        finally:
-            for tmp_path in temp_files:
-                try:
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
-                except Exception:
-                    pass
+
+    @staticmethod
+    def _calculate_fragment_hash(fragment: np.ndarray, sample_rate: int) -> str:
+        """Stable SHA256 hash for in-memory fragment content."""
+        normalized = np.ascontiguousarray(fragment.astype(np.float32, copy=False))
+        hasher = hashlib.sha256()
+        hasher.update(str(sample_rate).encode("utf-8"))
+        hasher.update(b"|")
+        hasher.update(normalized.tobytes())
+        return hasher.hexdigest()
 
     def process_directory(
         self,

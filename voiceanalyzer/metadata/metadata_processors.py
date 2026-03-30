@@ -145,7 +145,10 @@ def process_voxceleb2(input_dir: Path) -> List[MetadataEntry]:
         if not speaker_dir.exists():
             continue
 
-        for file_path in speaker_dir.rglob("*.aac"):
+        # VoxCeleb2 distributions can store audio under `aac/` but with different
+        # extensions (e.g. .aac or .m4a depending on the source/package).
+        # Iterate all files and keep only supported audio extensions.
+        for file_path in speaker_dir.rglob("*"):
             if not file_path.is_file() or file_path.suffix.lower() not in SUPPORTED_AUDIO_FORMATS:
                 continue
 

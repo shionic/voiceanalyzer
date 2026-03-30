@@ -2,13 +2,24 @@
 
 import argparse
 from pathlib import Path
-from typing import List
+from typing import Iterator, List
 
 from voiceanalyzer.metadata import (
     MetadataFile,
     process_mozilla_common_voice,
     process_voxceleb2,
 )
+from voiceanalyzer.metadata.metadata_file import MetadataEntry
+
+
+
+def _chunked(items: List[MetadataEntry], chunk_size: int) -> Iterator[List[MetadataEntry]]:
+    for i in range(0, len(items), chunk_size):
+        yield items[i:i + chunk_size]
+
+
+def _build_split_output_path(base_path: Path, part_index: int) -> Path:
+    return base_path.with_name(f"{base_path.stem}.part{part_index:04d}{base_path.suffix}")
 
 
 def main():
@@ -36,6 +47,15 @@ def main():
         default="json",
         help="Output metadata format (default: json)",
     )
+    parser.add_argument(
+        "--split-size",
+        type=int,
+        default=0,
+        help=(
+            "Maximum number of metadata entries per output file. "
+            "When > 0, writes multiple files like output.part0001.json"
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -45,6 +65,22 @@ def main():
         entries = process_voxceleb2(args.input_dir)
     else:
         raise ValueError(f"Unsupported process type: {args.process_type}")
+
+    if args.split_size < 0:
+        parser.error("--split-size must be >= 0")
+
+    if args.split_size > 0:
+        total_files = 0
+        for chunk_index, chunk in enumerate(_chunked(entries, args.split_size), start=1):
+            output_part = _build_split_output_path(args.output_metadata, chunk_index)
+            mf = MetadataFile(str(output_part))
+            mf.write(chunk, format=args.format)
+            total_files += 1
+        print(
+            f"Wrote {len(entries)} metadata entries into {total_files} files "
+            f"(split size: {args.split_size})"
+        )
+        return
 
     mf = MetadataFile(str(args.output_metadata))
     mf.write(entries, format=args.format)

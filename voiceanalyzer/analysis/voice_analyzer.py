@@ -373,26 +373,53 @@ class VoiceAnalyzer:
             VoiceAnalysisResult object
         """
         try:
-            # Load audio
-            print(f"Loading audio file...", file=sys.stderr)
-            audio, original_sr = self.load_audio(filepath)
+            audio, _ = self.load_audio(filepath)
+            return self.analyze_audio(
+                audio=audio,
+                filepath=filepath,
+                include_frames=include_frames,
+                verbose=False,
+            )
+
+        except Exception as e:
+            print(f"Error during analysis: {str(e)}", file=sys.stderr)
+            traceback.print_exc()
+            raise
+
+    def analyze_audio(
+        self,
+        audio: np.ndarray,
+        filepath: str = "<in-memory>",
+        include_frames: bool = False,
+        verbose: bool = False,
+    ) -> VoiceAnalysisResult:
+        """Analyze an already-loaded mono waveform.
+
+        This avoids redundant disk I/O when upstream code already has decoded audio.
+        """
+        try:
             duration = librosa.get_duration(y=audio, sr=self.sample_rate)
 
             # Extract features
-            print(f"Extracting pitch (pYIN)...", file=sys.stderr)
+            if verbose:
+                print(f"Extracting pitch (pYIN)...", file=sys.stderr)
             pitch, confidence = self.extract_pitch_pyin(audio)
 
-            print(f"Extracting formants (LPC)...", file=sys.stderr)
+            if verbose:
+                print(f"Extracting formants (LPC)...", file=sys.stderr)
             formants = self.extract_formants_lpc(audio, pitch)
 
-            print(f"Extracting MFCCs...", file=sys.stderr)
+            if verbose:
+                print(f"Extracting MFCCs...", file=sys.stderr)
             mfcc = self.extract_mfcc(audio)
 
-            print(f"Extracting spectral characteristics...", file=sys.stderr)
+            if verbose:
+                print(f"Extracting spectral characteristics...", file=sys.stderr)
             global_spectral, frame_spectral = self.extract_spectral_features(audio)
 
             # Calculate statistics
-            print(f"Calculating statistics...", file=sys.stderr)
+            if verbose:
+                print(f"Calculating statistics...", file=sys.stderr)
             pitch_stats, energy_stats = self.calculate_statistics(pitch, frame_spectral)
 
             # Calculate mean formants
@@ -415,7 +442,8 @@ class VoiceAnalyzer:
             # Prepare frame data if requested
             frames = None
             if include_frames:
-                print(f"Preparing frame-by-frame data...", file=sys.stderr)
+                if verbose:
+                    print(f"Preparing frame-by-frame data...", file=sys.stderr)
                 frames = []
                 n_frames = min(len(pitch), len(formants), len(frame_spectral), mfcc.shape[1])
 
@@ -435,7 +463,8 @@ class VoiceAnalyzer:
                     frames.append(frame)
 
             # Prepare result
-            print(f"Finalizing results...", file=sys.stderr)
+            if verbose:
+                print(f"Finalizing results...", file=sys.stderr)
             result = VoiceAnalysisResult(
                 filename=Path(filepath).name,
                 duration=duration,

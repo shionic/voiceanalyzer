@@ -240,6 +240,14 @@ Convert Mozilla Common Voice `train.tsv` into internal metadata format:
 python process_metadata.py mozilla_common_voice /path/to/commonvoice /path/to/output.json --format json
 ```
 
+Split output into multiple metadata files (for faster downstream batch processing):
+
+```bash
+python process_metadata.py mozilla_common_voice /path/to/commonvoice /path/to/output.json --format json --split-size 10000
+```
+
+This writes files like `output.part0001.json`, `output.part0002.json`, ...
+
 Output entries include:
 - `filepath` (relative under `clips/`)
 - `author` (`client_id`)

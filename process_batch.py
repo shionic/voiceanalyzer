@@ -56,6 +56,18 @@ Examples:
         default=1,
         help="Number of worker threads for batch processing (default: 1)",
     )
+    parser.add_argument(
+        "--torch-intra-threads",
+        type=int,
+        default=1,
+        help="Torch intra-op CPU threads per process (default: 1 for batch mode)",
+    )
+    parser.add_argument(
+        "--torch-inter-threads",
+        type=int,
+        default=1,
+        help="Torch inter-op CPU threads per process (default: 1 for batch mode)",
+    )
 
     parser.add_argument("--db-host", type=str, default="localhost")
     parser.add_argument("--db-port", type=int, default=5432)
@@ -105,6 +117,8 @@ Examples:
         include_frames=args.include_frames,
         split_long_audio=args.split_long_audio,
         max_workers=args.workers,
+        torch_intra_threads=args.torch_intra_threads,
+        torch_inter_threads=args.torch_inter_threads,
     )
 
     start_time = datetime.now()
