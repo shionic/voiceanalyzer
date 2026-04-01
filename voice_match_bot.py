@@ -37,18 +37,27 @@ def _hit_name(hit: SimilarityHit) -> str:
     return f"record#{hit.record_id}"
 
 
+def _fmt_pct_from_fraction(v: float | None, digits: int = 2) -> str:
+    if v is None:
+        return "n/a"
+    return f"{v * 100:.{digits}f}%"
+
+
 def format_output_html(result: VoiceMatchOutput) -> str:
+    def row(label: str, value: str, indent: str = "") -> str:
+        return f"{indent}• <b>{escape(label)}:</b> {value}"
+
     lines: list[str] = [
         "<b>🎙 Voice analysis complete</b>",
-        f"<i>File:</i> <code>{escape(result.filename)}</code>",
-        f"<i>Duration:</i> <b>{result.duration:.2f}s</b>",
+        row("File", f"<code>{escape(result.filename)}</code>"),
+        row("Duration", f"<b>{result.duration:.2f}s</b>"),
         "",
         "<b>📈 Core metrics</b>",
-        f"• Pitch mean: <b>{result.pitch_mean:.2f} Hz</b>",
-        f"• Voicing rate: <b>{result.voicing_rate:.2%}</b>",
-        f"• Energy mean: <b>{result.energy_mean:.6f}</b>",
+        row("Pitch mean", f"<b>{result.pitch_mean:.2f} Hz</b>"),
+        row("Voicing rate", f"<b>{result.voicing_rate:.2%}</b>"),
+        row("Energy mean", f"<b>{result.energy_mean:.6f}</b>"),
         (
-            "• Formants: "
+            "• <b>Formants:</b> "
             f"F1={_fmt_opt(result.formants_hz.get('f1'))}, "
             f"F2={_fmt_opt(result.formants_hz.get('f2'))}, "
             f"F3={_fmt_opt(result.formants_hz.get('f3'))}, "
@@ -84,39 +93,39 @@ def format_output_html(result: VoiceMatchOutput) -> str:
 
         lines.extend([
             f"{label_emoji} <b>{label}:</b> {_hit_name(hit)}",
-            f"   Similarity: <b>{hit.similarity:.4f}</b> (distance: {hit.cosine_distance:.4f})",
-            f"   Record ID: <code>{hit.record_id}</code>",
-            f"   Tags: <code>{escape(', '.join(hit.tags) if hit.tags else 'n/a')}</code>",
-            f"   Ref duration/source: {fmt(hit.reference_duration)}s / {escape(hit.reference_author_source or 'n/a')}",
-            f"   Ref pitch mean/voicing: {fmt(hit.reference_pitch_mean)} Hz / {fmt(hit.reference_voicing_rate * 100 if hit.reference_voicing_rate is not None else None)}%",
+            row("Similarity", f"<b>{hit.similarity:.4f}</b> (cosine distance: {hit.cosine_distance:.4f})", "   "),
+            row("Record ID", f"<code>{hit.record_id}</code>", "   "),
+            row("Tags", f"<code>{escape(', '.join(hit.tags) if hit.tags else 'n/a')}</code>", "   "),
+            row("Reference duration / source", f"{fmt(hit.reference_duration)}s / {escape(hit.reference_author_source or 'n/a')}", "   "),
+            row("Reference pitch mean / voicing", f"{fmt(hit.reference_pitch_mean)} Hz / {_fmt_pct_from_fraction(hit.reference_voicing_rate)}", "   "),
 
             "   <b>Ref pitch stats</b>",
-            f"   mean={fmt(ref_pitch.get('mean'))}, std={fmt(ref_pitch.get('std'))}, min={fmt(ref_pitch.get('min'))}, max={fmt(ref_pitch.get('max'))}",
-            f"   p5={fmt(ref_pitch.get('p5'))}, p95={fmt(ref_pitch.get('p95'))}, median={fmt(ref_pitch.get('median'))}, voicing={fmt(ref_pitch.get('voicing_rate') * 100 if ref_pitch.get('voicing_rate') is not None else None)}%",
+            row("mean / std / min / max", f"{fmt(ref_pitch.get('mean'))} / {fmt(ref_pitch.get('std'))} / {fmt(ref_pitch.get('min'))} / {fmt(ref_pitch.get('max'))}", "   "),
+            row("p5 / p95 / median / voicing", f"{fmt(ref_pitch.get('p5'))} / {fmt(ref_pitch.get('p95'))} / {fmt(ref_pitch.get('median'))} / {_fmt_pct_from_fraction(ref_pitch.get('voicing_rate'))}", "   "),
 
             "   <b>Δ pitch stats (input-ref)</b>",
-            f"   Δmean={fmt(d_pitch.get('mean'))} ({pct(d_pitch_pct.get('mean'))}), Δstd={fmt(d_pitch.get('std'))} ({pct(d_pitch_pct.get('std'))})",
-            f"   Δmin={fmt(d_pitch.get('min'))} ({pct(d_pitch_pct.get('min'))}), Δmax={fmt(d_pitch.get('max'))} ({pct(d_pitch_pct.get('max'))})",
-            f"   Δp5={fmt(d_pitch.get('p5'))} ({pct(d_pitch_pct.get('p5'))}), Δp95={fmt(d_pitch.get('p95'))} ({pct(d_pitch_pct.get('p95'))}), Δmedian={fmt(d_pitch.get('median'))} ({pct(d_pitch_pct.get('median'))})",
+            row("Δmean / Δstd", f"{fmt(d_pitch.get('mean'))} ({pct(d_pitch_pct.get('mean'))}) / {fmt(d_pitch.get('std'))} ({pct(d_pitch_pct.get('std'))})", "   "),
+            row("Δmin / Δmax", f"{fmt(d_pitch.get('min'))} ({pct(d_pitch_pct.get('min'))}) / {fmt(d_pitch.get('max'))} ({pct(d_pitch_pct.get('max'))})", "   "),
+            row("Δp5 / Δp95 / Δmedian", f"{fmt(d_pitch.get('p5'))} ({pct(d_pitch_pct.get('p5'))}) / {fmt(d_pitch.get('p95'))} ({pct(d_pitch_pct.get('p95'))}) / {fmt(d_pitch.get('median'))} ({pct(d_pitch_pct.get('median'))})", "   "),
 
             "   <b>Ref energy</b>",
-            f"   mean={fmt(ref_energy.get('mean'), 6)}, std={fmt(ref_energy.get('std'), 6)}, min={fmt(ref_energy.get('min'), 6)}, max={fmt(ref_energy.get('max'), 6)}",
-            f"   p5={fmt(ref_energy.get('p5'), 6)}, p95={fmt(ref_energy.get('p95'), 6)}, dynamic_range={fmt(ref_energy.get('dynamic_range'), 6)}",
-            f"   Δenergy_mean={fmt(hit.diff_energy_mean, 6)} ({pct(hit.diff_energy_mean_pct)})",
+            row("mean / std / min / max", f"{fmt(ref_energy.get('mean'), 6)} / {fmt(ref_energy.get('std'), 6)} / {fmt(ref_energy.get('min'), 6)} / {fmt(ref_energy.get('max'), 6)}", "   "),
+            row("p5 / p95 / dynamic_range", f"{fmt(ref_energy.get('p5'), 6)} / {fmt(ref_energy.get('p95'), 6)} / {fmt(ref_energy.get('dynamic_range'), 6)}", "   "),
+            row("Δenergy_mean", f"{fmt(hit.diff_energy_mean, 6)} ({pct(hit.diff_energy_mean_pct)})", "   "),
 
             "   <b>Ref formants (Hz)</b>",
-            f"   F1={fmt(ref_formants.get('f1'))}, F2={fmt(ref_formants.get('f2'))}, F3={fmt(ref_formants.get('f3'))}, F4={fmt(ref_formants.get('f4'))}",
+            row("F1 / F2 / F3 / F4", f"{fmt(ref_formants.get('f1'))} / {fmt(ref_formants.get('f2'))} / {fmt(ref_formants.get('f3'))} / {fmt(ref_formants.get('f4'))}", "   "),
             "   <b>Δ formants (Hz, input-ref)</b>",
-            f"   ΔF1={fmt(d_formants.get('f1'))} ({pct(d_formants_pct.get('f1'))}), ΔF2={fmt(d_formants.get('f2'))} ({pct(d_formants_pct.get('f2'))})",
-            f"   ΔF3={fmt(d_formants.get('f3'))} ({pct(d_formants_pct.get('f3'))}), ΔF4={fmt(d_formants.get('f4'))} ({pct(d_formants_pct.get('f4'))})",
+            row("ΔF1 / ΔF2", f"{fmt(d_formants.get('f1'))} ({pct(d_formants_pct.get('f1'))}) / {fmt(d_formants.get('f2'))} ({pct(d_formants_pct.get('f2'))})", "   "),
+            row("ΔF3 / ΔF4", f"{fmt(d_formants.get('f3'))} ({pct(d_formants_pct.get('f3'))}) / {fmt(d_formants.get('f4'))} ({pct(d_formants_pct.get('f4'))})", "   "),
 
             "   <b>Ref spectral</b>",
-            f"   centroid={fmt(ref_spectral.get('centroid'))}, bandwidth={fmt(ref_spectral.get('bandwidth'))}, rolloff={fmt(ref_spectral.get('rolloff'))}",
-            f"   flatness={fmt(ref_spectral.get('flatness'), 6)}, zcr={fmt(ref_spectral.get('zero_crossing_rate'), 6)}, rms={fmt(ref_spectral.get('rms_energy'), 6)}",
+            row("centroid / bandwidth / rolloff", f"{fmt(ref_spectral.get('centroid'))} / {fmt(ref_spectral.get('bandwidth'))} / {fmt(ref_spectral.get('rolloff'))}", "   "),
+            row("flatness / zcr / rms", f"{fmt(ref_spectral.get('flatness'), 6)} / {fmt(ref_spectral.get('zero_crossing_rate'), 6)} / {fmt(ref_spectral.get('rms_energy'), 6)}", "   "),
             "   <b>Δ spectral (input-ref)</b>",
-            f"   Δcentroid={fmt(d_spec.get('centroid'))} ({pct(d_spec_pct.get('centroid'))}), Δbandwidth={fmt(d_spec.get('bandwidth'))} ({pct(d_spec_pct.get('bandwidth'))})",
-            f"   Δrolloff={fmt(d_spec.get('rolloff'))} ({pct(d_spec_pct.get('rolloff'))}), Δflatness={fmt(d_spec.get('flatness'), 6)} ({pct(d_spec_pct.get('flatness'))})",
-            f"   Δzcr={fmt(d_spec.get('zero_crossing_rate'), 6)} ({pct(d_spec_pct.get('zero_crossing_rate'))}), Δrms={fmt(d_spec.get('rms_energy'), 6)} ({pct(d_spec_pct.get('rms_energy'))})",
+            row("Δcentroid / Δbandwidth", f"{fmt(d_spec.get('centroid'))} ({pct(d_spec_pct.get('centroid'))}) / {fmt(d_spec.get('bandwidth'))} ({pct(d_spec_pct.get('bandwidth'))})", "   "),
+            row("Δrolloff / Δflatness", f"{fmt(d_spec.get('rolloff'))} ({pct(d_spec_pct.get('rolloff'))}) / {fmt(d_spec.get('flatness'), 6)} ({pct(d_spec_pct.get('flatness'))})", "   "),
+            row("Δzcr / Δrms", f"{fmt(d_spec.get('zero_crossing_rate'), 6)} ({pct(d_spec_pct.get('zero_crossing_rate'))}) / {fmt(d_spec.get('rms_energy'), 6)} ({pct(d_spec_pct.get('rms_energy'))})", "   "),
         ])
 
     one_hit("👨", "male reference", result.male_best)
@@ -127,18 +136,18 @@ def format_output_html(result: VoiceMatchOutput) -> str:
         lines.extend([
             "",
             "<b>⚖️ Comparison</b>",
-            f"• Similarity gap: <b>{abs(result.male_best.similarity - result.female_best.similarity):.4f}</b>",
-            f"• Pipeline gap field: <b>{_fmt_opt(result.male_female_similarity_gap, 4)}</b>",
-            f"• Better match: <b>{better}</b>",
+            row("Similarity gap", f"<b>{abs(result.male_best.similarity - result.female_best.similarity):.4f}</b>"),
+            row("Pipeline gap field", f"<b>{_fmt_opt(result.male_female_similarity_gap, 4)}</b>"),
+            row("Better match", f"<b>{better}</b>"),
         ])
 
     lines.extend([
         "",
         "<b>📊 Full input features</b>",
-        f"• Pitch: mean={result.pitch_mean:.2f}, std={result.pitch_std:.2f}, min={result.pitch_min:.2f}, max={result.pitch_max:.2f}, p5={result.pitch_p5:.2f}, p95={result.pitch_p95:.2f}, median={result.pitch_median:.2f}, voicing={result.voicing_rate:.2%}",
-        f"• Energy: mean={result.energy_mean:.6f}, std={result.energy_std:.6f}, min={result.energy_min:.6f}, max={result.energy_max:.6f}, p5={result.energy_p5:.6f}, p95={result.energy_p95:.6f}, dynamic_range={result.energy_dynamic_range:.6f}",
+        row("Pitch", f"mean={result.pitch_mean:.2f}, std={result.pitch_std:.2f}, min={result.pitch_min:.2f}, max={result.pitch_max:.2f}, p5={result.pitch_p5:.2f}, p95={result.pitch_p95:.2f}, median={result.pitch_median:.2f}, voicing={result.voicing_rate:.2%}"),
+        row("Energy", f"mean={result.energy_mean:.6f}, std={result.energy_std:.6f}, min={result.energy_min:.6f}, max={result.energy_max:.6f}, p5={result.energy_p5:.6f}, p95={result.energy_p95:.6f}, dynamic_range={result.energy_dynamic_range:.6f}"),
         (
-            "• Spectral: "
+            "• <b>Spectral:</b> "
             f"centroid={_fmt_opt(result.spectral.get('centroid'))}, "
             f"bandwidth={_fmt_opt(result.spectral.get('bandwidth'))}, "
             f"rolloff={_fmt_opt(result.spectral.get('rolloff'))}, "
@@ -147,13 +156,13 @@ def format_output_html(result: VoiceMatchOutput) -> str:
             f"rms={_fmt_opt(result.spectral.get('rms_energy'), 6)}"
         ),
         (
-            "• Formants (Hz): "
+            "• <b>Formants (Hz):</b> "
             f"F1={_fmt_opt(result.formants_hz.get('f1'))}, "
             f"F2={_fmt_opt(result.formants_hz.get('f2'))}, "
             f"F3={_fmt_opt(result.formants_hz.get('f3'))}, "
             f"F4={_fmt_opt(result.formants_hz.get('f4'))}"
         ),
-        f"• MFCC mean ({len(result.mfcc_mean)}): {escape(', '.join(f'{v:.3f}' for v in result.mfcc_mean))}",
+        row(f"MFCC mean ({len(result.mfcc_mean)})", escape(', '.join(f'{v:.3f}' for v in result.mfcc_mean))),
     ])
 
     lines.append("\n✅ <i>Tip:</i> use <code>/analyze</code> as a reply to any voice/audio message.")
